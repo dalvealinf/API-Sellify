@@ -96,6 +96,7 @@ def get_users():
                     u.apellido, 
                     u.correo, 
                     u.telefono, 
+                    (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario,
                     IFNULL(p.puntos, 0) AS puntos
                 FROM USUARIOS u
                 LEFT JOIN PUNTOS p ON u.id_usuario = p.id_cliente
