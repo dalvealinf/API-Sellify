@@ -1,6 +1,7 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, jsonify, request
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from flask_cors import CORS
 from config import get_db_connection
 from dotenv import load_dotenv
 import os
@@ -8,6 +9,7 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)
 app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # Clave estática para JWT
 jwt = JWTManager(app)
 
@@ -17,7 +19,6 @@ jwt = JWTManager(app)
 #########################################################
 # Ruta para el registro de usuarios
 @app.route('/register', methods=['POST'])
-@jwt_required()
 def register():
     rut = request.json.get('rut')
     nombre = request.json.get('nombre')
@@ -25,8 +26,10 @@ def register():
     correo = request.json.get('correo')
     contrasena = request.json.get('contrasena')
     telefono = request.json.get('telefono')
+    tipo_usuario = request.json.get('tipo_usuario')
 
-    if not all([rut, nombre, apellido, correo, contrasena, telefono]):
+    # Validar que los campos obligatorios estén presentes
+    if not all([rut, nombre, apellido, correo, contrasena, telefono, tipo_usuario]):
         return jsonify({"msg": "Faltan datos"}), 400
 
     password_hash = generate_password_hash(contrasena)
@@ -34,12 +37,23 @@ def register():
 
     try:
         with connection.cursor() as cursor:
-            cursor.execute('INSERT INTO USUARIOS (rut, nombre, apellido, correo, contrasena, telefono) VALUES (%s, %s, %s, %s, %s, %s)', 
-                           (rut, nombre, apellido, correo, password_hash, telefono))
+            # Verificar si el tipo de usuario existe en la tabla TIPOUSUARIO
+            cursor.execute('SELECT id_tipo_usuario FROM TIPOUSUARIO WHERE tipo = %s', (tipo_usuario,))
+            tipo_usuario_id = cursor.fetchone()
+
+            if not tipo_usuario_id:
+                return jsonify({"msg": "Tipo de usuario no válido"}), 400
+
+            # Insertar el nuevo usuario
+            cursor.execute('''
+                INSERT INTO USUARIOS (rut, nombre, apellido, correo, contrasena, telefono, id_tipo_usuario)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (rut, nombre, apellido, correo, password_hash, telefono, tipo_usuario_id['id_tipo_usuario']))
+
             connection.commit()
         return jsonify({"msg": "Usuario registrado exitosamente"}), 201
-    except:
-        return jsonify({"msg": "El usuario ya existe o ocurrió un error"}), 400
+    except Exception as e:
+        return jsonify({"msg": "El usuario ya existe o ocurrió un error", "error": str(e)}), 400
     finally:
         connection.close()
 
@@ -69,37 +83,50 @@ def login():
 
 # Ruta para obtener todos los usuarios registrados
 @app.route('/users', methods=['GET'])
-@jwt_required()
 def get_users():
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute('SELECT id_usuario, rut, nombre, apellido, correo, telefono FROM USUARIOS')
+            # Consulta SQL para obtener los usuarios
+            cursor.execute('''
+                SELECT 
+                    u.id_usuario, 
+                    u.rut, 
+                    u.nombre, 
+                    u.apellido, 
+                    u.correo, 
+                    u.telefono, 
+                    IFNULL(p.puntos, 0) AS puntos
+                FROM USUARIOS u
+                LEFT JOIN PUNTOS p ON u.id_usuario = p.id_cliente
+            ''')
             users = cursor.fetchall()
+        
         return jsonify(users), 200
     finally:
         connection.close()
 
 # Ruta para obtener los datos de un usuario dado su rut
 @app.route('/users/<string:rut>', methods=['GET'])
-@jwt_required()
 def get_user_by_rut(rut):
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            # Consulta SQL para obtener todos los datos de un usuario dado su rut
+            # Consulta SQL para obtener el usuario
             cursor.execute('''
                 SELECT 
-                    id_usuario,
-                    rut,
-                    nombre,
-                    apellido,
-                    correo,
-                    telefono,
-                    fecha_creacion,
+                    u.id_usuario,
+                    u.rut,
+                    u.nombre,
+                    u.apellido,
+                    u.correo,
+                    u.telefono,
+                    u.fecha_creacion,
                     (SELECT estado FROM ESTADO WHERE id_estado = u.id_estado) AS estado,
-                    (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario
+                    (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario,
+                    IFNULL(p.puntos, 0) AS puntos
                 FROM USUARIOS u
+                LEFT JOIN PUNTOS p ON u.id_usuario = p.id_cliente
                 WHERE u.rut = %s
             ''', (rut,))
             
@@ -112,33 +139,8 @@ def get_user_by_rut(rut):
     finally:
         connection.close()
 
-# Ruta para agregar un usuario
-@app.route('/users', methods=['POST'])
-@jwt_required()
-def add_user():
-    new_user = request.json
-    rut = new_user['rut']
-    nombre = new_user['nombre']
-    apellido = new_user['apellido']
-    correo = new_user['correo']
-    contrasena = new_user['contrasena']
-    telefono = new_user['telefono']
-
-    password_hash = generate_password_hash(contrasena)
-    
-    connection = get_db_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute('INSERT INTO USUARIOS (rut, nombre, apellido, correo, contrasena, telefono) VALUES (%s, %s, %s, %s, %s, %s)',
-                           (rut, nombre, apellido, correo, password_hash, telefono))
-            connection.commit()
-        return jsonify({'message': 'Usuario agregado exitosamente!'}), 201
-    finally:
-        connection.close()
-
 # Ruta para eliminar un usuario utilizando su RUT
 @app.route('/users/<string:rut>', methods=['DELETE'])
-@jwt_required()
 def delete_user(rut):
     connection = get_db_connection()
     try:
@@ -153,7 +155,6 @@ def delete_user(rut):
 
 # Ruta para actualizar un usuario utilizando su RUT
 @app.route('/users/<string:rut>', methods=['PUT'])
-@jwt_required()
 def update_user(rut):
     new_data = request.json
     nombre = new_data.get('nombre')
@@ -161,35 +162,58 @@ def update_user(rut):
     correo = new_data.get('correo')
     telefono = new_data.get('telefono')
     contrasena = new_data.get('contrasena')
+    tipo_usuario = new_data.get('tipo_usuario')
     
     # Validar que se han proporcionado algunos datos para actualizar
-    if not any([nombre, apellido, correo, telefono, contrasena]):
+    if not any([nombre, apellido, correo, telefono, contrasena, tipo_usuario]):
         return jsonify({"msg": "No se proporcionaron datos para actualizar"}), 400
-    
-    # Construir la consulta de actualización dinámica en base a los datos proporcionados
+
+    # Construir la consulta de actualización en base a los datos dados (no es necesario rellenarlos todos)
     updates = []
+    params = []
+
     if nombre:
         updates.append("nombre = %s")
+        params.append(nombre)
     if apellido:
         updates.append("apellido = %s")
+        params.append(apellido)
     if correo:
         updates.append("correo = %s")
+        params.append(correo)
     if telefono:
         updates.append("telefono = %s")
+        params.append(telefono)
     if contrasena:
-        contrasena = generate_password_hash(contrasena)
+        hashed_password = generate_password_hash(contrasena)
         updates.append("contrasena = %s")
+        params.append(hashed_password)
+    
+    # Si se proporciona el tipo de usuario, validar si existe en la tabla TIPOUSUARIO
+    if tipo_usuario:
+        connection = get_db_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT id_tipo_usuario FROM TIPOUSUARIO WHERE tipo = %s', (tipo_usuario,))
+                tipo_usuario_id = cursor.fetchone()
+                
+                if not tipo_usuario_id:
+                    return jsonify({"msg": "Tipo de usuario no válido"}), 400
+                
+                # Si el tipo de usuario es válido, se añade a la lista de campos a actualizar
+                updates.append("id_tipo_usuario = %s")
+                params.append(tipo_usuario_id['id_tipo_usuario'])
+        finally:
+            connection.close()
     
     if not updates:
         return jsonify({"msg": "No hay datos para actualizar"}), 400
 
     query = f"UPDATE USUARIOS SET {', '.join(updates)} WHERE rut = %s"
     
-    # Ejecutar la consulta SQL
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            params = [new_data.get(key) for key in ['nombre', 'apellido', 'correo', 'telefono', 'contrasena'] if new_data.get(key) is not None]
             cursor.execute(query, (*params, rut))
             connection.commit()
 
@@ -200,12 +224,69 @@ def update_user(rut):
     finally:
         connection.close()
 
+# Ruta para obtener todos los tipos de usuario
+@app.route('/tiposusuario', methods=['GET'])
+def get_all_user_types():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Consulta SQL para obtener todos los tipos de usuario
+            cursor.execute('SELECT id_tipo_usuario, tipo FROM TIPOUSUARIO')
+            user_types = cursor.fetchall()
+        
+        # Retornar los tipos de usuario en formato JSON
+        return jsonify(user_types), 200
+    finally:
+        connection.close()
+
+# Ruta para modificar o agregar puntos de un usuario si tiene id_tipo_usuario = 3
+@app.route('/users/<string:rut>/puntos', methods=['PUT'])
+def update_user_points(rut):
+    new_points = request.json.get('puntos')
+
+    if new_points is None:
+        return jsonify({"msg": "Faltan los puntos para actualizar"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Verificar si el usuario con el RUT existe y tiene id_tipo_usuario = 3
+            cursor.execute('SELECT id_usuario, id_tipo_usuario FROM USUARIOS WHERE rut = %s', (rut,))
+            user = cursor.fetchone()
+
+            if not user:
+                return jsonify({"msg": "Usuario no encontrado"}), 404
+
+            if user['id_tipo_usuario'] != 3:
+                return jsonify({"msg": "Solo se pueden modificar los puntos de clientes"}), 403
+
+            id_usuario = user['id_usuario']
+
+            # Verificar si el usuario ya tiene puntos registrados
+            cursor.execute('SELECT * FROM PUNTOS WHERE id_cliente = %s', (id_usuario,))
+            points_record = cursor.fetchone()
+
+            if points_record:
+                # Si ya tiene puntos registrados, actualizarlos
+                cursor.execute('UPDATE PUNTOS SET puntos = %s WHERE id_cliente = %s', (new_points, id_usuario))
+                message = "Puntos actualizados exitosamente"
+            else:
+                # Si no tiene puntos registrados, crear un nuevo registro
+                cursor.execute('INSERT INTO PUNTOS (id_cliente, puntos) VALUES (%s, %s)', (id_usuario, new_points))
+                message = "Puntos agregados exitosamente"
+
+            # Confirmar cambios en la base de datos
+            connection.commit()
+
+        return jsonify({"msg": message}), 200
+    finally:
+        connection.close()
+
 #########################################################
 #                   Sección Productos                   #
 #########################################################
 # Ruta para obtener los datos de un producto con su codigo de barras
 @app.route('/product/barcode/<string:codigo_barras>', methods=['GET'])
-@jwt_required()
 def get_product_by_barcode(codigo_barras):
     connection = get_db_connection()
     try:
@@ -245,7 +326,6 @@ def get_product_by_barcode(codigo_barras):
 
 # Ruta para borrar un producto dado su codigo de barras
 @app.route('/product/barcode/<string:codigo_barras>', methods=['DELETE'])
-@jwt_required()
 def delete_product_by_barcode(codigo_barras):
     connection = get_db_connection()
     try:
@@ -265,7 +345,6 @@ def delete_product_by_barcode(codigo_barras):
 
 # Ruta para actualizar los datos de un producto dado su codigo de barras
 @app.route('/product/barcode/<string:codigo_barras>', methods=['PUT'])
-@jwt_required()
 def update_product_by_barcode(codigo_barras):
     new_data = request.json
     nombre = new_data.get('nombre')
@@ -312,7 +391,6 @@ def update_product_by_barcode(codigo_barras):
 
 # Ruta para agregar un producto
 @app.route('/product', methods=['POST'])
-@jwt_required()
 def add_product():
     new_data = request.json
     nombre = new_data.get('nombre')
@@ -359,6 +437,56 @@ def add_product():
             connection.commit()
 
         return jsonify({"msg": "Producto agregado exitosamente"}), 201
+    finally:
+        connection.close()
+
+# Ruta para obtener todos los productos
+@app.route('/products', methods=['GET'])
+def get_all_products():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Consulta SQL para obtener todos los productos y su informaci�n
+            cursor.execute('''
+                SELECT 
+                    p.id_producto, 
+                    p.nombre, 
+                    p.descripcion, 
+                    p.fecha_registro, 
+                    p.fecha_vencimiento, 
+                    s.stock, 
+                    d.porcentaje AS descuento, 
+                    cb.codigo AS codigo_barras, 
+                    pr.precio_venta, 
+                    e.estado AS estado_producto, 
+                    c.nombre_categoria AS categoria
+                FROM PRODUCTOS p
+                LEFT JOIN STOCK s ON p.id_producto = s.id_producto
+                LEFT JOIN DESCUENTOS d ON p.id_producto = d.id_producto
+                LEFT JOIN CODIGOBARRAS cb ON p.id_producto = cb.id_producto
+                LEFT JOIN PRECIO pr ON p.id_producto = pr.id_producto
+                LEFT JOIN ESTADO e ON p.id_estado = e.id_estado
+                LEFT JOIN CATEGORIA c ON p.id_categoria = c.id_categoria
+            ''')
+            products = cursor.fetchall()
+        
+        # Retornar los productos en formato JSON
+        return jsonify(products), 200
+    finally:
+        connection.close()
+
+# Ruta para obtener todas las categorías
+@app.route('/categories', methods=['GET'])
+def get_all_categories():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Consulta SQL para obtener todas las categorías
+            cursor.execute('SELECT id_categoria, nombre_categoria FROM CATEGORIA')
+            categories = cursor.fetchall()
+        
+        # Retornar las categorías en formato JSON
+        return jsonify(categories), 200
     finally:
         connection.close()
 
