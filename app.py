@@ -27,9 +27,10 @@ def register():
     contrasena = request.json.get('contrasena')
     telefono = request.json.get('telefono')
     tipo_usuario = request.json.get('tipo_usuario')
+    estado = request.json.get('estado')
 
     # Validar que los campos obligatorios estén presentes
-    if not all([rut, nombre, apellido, correo, contrasena, telefono, tipo_usuario]):
+    if not all([rut, nombre, apellido, correo, contrasena, telefono, tipo_usuario, estado]):
         return jsonify({"msg": "Faltan datos"}), 400
 
     password_hash = generate_password_hash(contrasena)
@@ -44,11 +45,18 @@ def register():
             if not tipo_usuario_id:
                 return jsonify({"msg": "Tipo de usuario no válido"}), 400
 
+            # Verificar si el estado es válido en la tabla ESTADO
+            cursor.execute('SELECT id_estado FROM ESTADO WHERE estado = %s', (estado,))
+            estado_id = cursor.fetchone()
+
+            if not estado_id:
+                return jsonify({"msg": "Estado no válido"}), 400
+
             # Insertar el nuevo usuario
             cursor.execute('''
-                INSERT INTO USUARIOS (rut, nombre, apellido, correo, contrasena, telefono, id_tipo_usuario)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (rut, nombre, apellido, correo, password_hash, telefono, tipo_usuario_id['id_tipo_usuario']))
+                INSERT INTO USUARIOS (rut, nombre, apellido, correo, contrasena, telefono, id_tipo_usuario, id_estado)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (rut, nombre, apellido, correo, password_hash, telefono, tipo_usuario_id['id_tipo_usuario'], estado_id['id_estado']))
 
             connection.commit()
         return jsonify({"msg": "Usuario registrado exitosamente"}), 201
@@ -64,7 +72,7 @@ def login():
     contrasena = request.json.get('contrasena')
 
     if not rut or not contrasena:
-        return jsonify({"msg": "RUT y contraseña son obligatorios"}), 400
+        return jsonify({"msg": "RUT y contraseÃ±a son obligatorios"}), 400
 
     connection = get_db_connection()
     try:
@@ -73,34 +81,58 @@ def login():
             user = cursor.fetchone()
 
         if user and check_password_hash(user['contrasena'], contrasena):
-            # Crear token de autenticación con el RUT como identidad
+            # Crear token de autenticaciÃ³n con el RUT como identidad
             access_token = create_access_token(identity={'rut': rut, 'nombre': user['nombre']})
             return jsonify(access_token=access_token), 200
         else:
-            return jsonify({"msg": "RUT o contraseña incorrectos"}), 401
+            return jsonify({"msg": "RUT o contraseÃ±a incorrectos"}), 401
     finally:
         connection.close()
 
-# Ruta para obtener todos los usuarios registrados
+# Ruta para obtener todos los usuarios registrados según el parámetro dado
 @app.route('/users', methods=['GET'])
 def get_users():
+    tipo_usuario = request.args.get('tipo_usuario')  # Obtener el parámetro tipo_usuario
+    
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            # Consulta SQL para obtener los usuarios
-            cursor.execute('''
-                SELECT 
-                    u.id_usuario, 
-                    u.rut, 
-                    u.nombre, 
-                    u.apellido, 
-                    u.correo, 
-                    u.telefono, 
-                    (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario,
-                    IFNULL(p.puntos, 0) AS puntos
-                FROM USUARIOS u
-                LEFT JOIN PUNTOS p ON u.id_usuario = p.id_cliente
-            ''')
+            # Consulta SQL con o sin filtro de tipo_usuario
+            if tipo_usuario:
+                cursor.execute('''
+                    SELECT 
+                        u.id_usuario, 
+                        u.rut, 
+                        u.nombre, 
+                        u.apellido, 
+                        u.correo, 
+                        u.telefono, 
+                        u.fecha_creacion,
+                        (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario,
+                        (SELECT estado FROM ESTADO WHERE id_estado = u.id_estado) AS estado,
+                        IFNULL(p.puntos, 0) AS puntos
+                    FROM USUARIOS u
+                    LEFT JOIN PUNTOS p ON u.id_usuario = p.id_cliente
+                    WHERE (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) = %s
+                ''', (tipo_usuario,))
+            else:
+                # Si no se proporciona tipo_usuario, devolver todos los usuarios
+                cursor.execute('''
+                    SELECT 
+                        u.id_usuario, 
+                        u.rut, 
+                        u.nombre, 
+                        u.apellido, 
+                        u.correo, 
+                        u.telefono, 
+                        u.fecha_creacion,
+                        (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario,
+                        (SELECT estado FROM ESTADO WHERE id_estado = u.id_estado) AS estado,
+                        IFNULL(p.puntos, 0) AS puntos
+                    FROM USUARIOS u
+                    LEFT JOIN PUNTOS p ON u.id_usuario = p.id_cliente
+                ''')
+
             users = cursor.fetchall()
         
         return jsonify(users), 200
@@ -140,17 +172,27 @@ def get_user_by_rut(rut):
     finally:
         connection.close()
 
-# Ruta para eliminar un usuario utilizando su RUT
+# Ruta para cambiar el estado de un usuario a inactivo utilizando su RUT
 @app.route('/users/<string:rut>', methods=['DELETE'])
-def delete_user(rut):
+def deactivate_user(rut):
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute('DELETE FROM USUARIOS WHERE rut = %s', (rut,))
+            # Obtener el id del estado 'inactivo' desde la tabla ESTADO
+            cursor.execute('SELECT id_estado FROM ESTADO WHERE estado = %s', ('inactivo',))
+            estado_inactivo = cursor.fetchone()
+
+            if not estado_inactivo:
+                return jsonify({"msg": "Estado inactivo no encontrado"}), 400
+
+            # Actualizar el estado del usuario a inactivo
+            cursor.execute('UPDATE USUARIOS SET id_estado = %s WHERE rut = %s', (estado_inactivo['id_estado'], rut))
             connection.commit()
-        if cursor.rowcount == 0:
-            return jsonify({'message': 'Usuario no encontrado'}), 404
-        return jsonify({'message': 'Usuario eliminado exitosamente!'}), 200
+
+            if cursor.rowcount == 0:
+                return jsonify({'message': 'Usuario no encontrado'}), 404
+
+        return jsonify({'message': 'Usuario desactivado exitosamente'}), 200
     finally:
         connection.close()
 
@@ -164,9 +206,10 @@ def update_user(rut):
     telefono = new_data.get('telefono')
     contrasena = new_data.get('contrasena')
     tipo_usuario = new_data.get('tipo_usuario')
+    estado = new_data.get('estado')
     
     # Validar que se han proporcionado algunos datos para actualizar
-    if not any([nombre, apellido, correo, telefono, contrasena, tipo_usuario]):
+    if not any([nombre, apellido, correo, telefono, contrasena, tipo_usuario, estado]):
         return jsonify({"msg": "No se proporcionaron datos para actualizar"}), 400
 
     # Construir la consulta de actualización en base a los datos dados (no es necesario rellenarlos todos)
@@ -206,7 +249,24 @@ def update_user(rut):
                 params.append(tipo_usuario_id['id_tipo_usuario'])
         finally:
             connection.close()
-    
+
+    # Si se proporciona el estado, validar si existe en la tabla ESTADO
+    if estado:
+        connection = get_db_connection()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT id_estado FROM ESTADO WHERE estado = %s', (estado,))
+                estado_id = cursor.fetchone()
+                
+                if not estado_id:
+                    return jsonify({"msg": "Estado no válido"}), 400
+                
+                # Si el estado es válido, se añade a la lista de campos a actualizar
+                updates.append("id_estado = %s")
+                params.append(estado_id['id_estado'])
+        finally:
+            connection.close()
+
     if not updates:
         return jsonify({"msg": "No hay datos para actualizar"}), 400
 
@@ -325,22 +385,31 @@ def get_product_by_barcode(codigo_barras):
     finally:
         connection.close()
 
-# Ruta para borrar un producto dado su codigo de barras
+# Ruta para cambiar el estado de un producto a inactivo dado su codigo de barras
 @app.route('/product/barcode/<string:codigo_barras>', methods=['DELETE'])
-def delete_product_by_barcode(codigo_barras):
+def deactivate_product_by_barcode(codigo_barras):
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
+            # Obtener el id del producto mediante el codigo de barras
             cursor.execute('SELECT id_producto FROM CODIGOBARRAS WHERE codigo = %s', (codigo_barras,))
             product = cursor.fetchone()
 
             if not product:
                 return jsonify({"msg": "Producto no encontrado"}), 404
 
-            cursor.execute('DELETE FROM PRODUCTOS WHERE id_producto = %s', (product['id_producto'],))
+            # Obtener el id del estado 'inactivo' desde la tabla ESTADO
+            cursor.execute('SELECT id_estado FROM ESTADO WHERE estado = %s', ('inactivo',))
+            estado_inactivo = cursor.fetchone()
+
+            if not estado_inactivo:
+                return jsonify({"msg": "Estado inactivo no encontrado"}), 400
+
+            # Actualizar el estado del producto a inactivo
+            cursor.execute('UPDATE PRODUCTOS SET id_estado = %s WHERE id_producto = %s', (estado_inactivo['id_estado'], product['id_producto']))
             connection.commit()
 
-        return jsonify({"msg": "Producto eliminado exitosamente"}), 200
+        return jsonify({"msg": "Producto marcado como inactivo exitosamente"}), 200
     finally:
         connection.close()
 
@@ -404,7 +473,7 @@ def add_product():
     categoria = new_data.get('categoria')
     codigo_barras = new_data.get('codigo_barras')
 
-    # Validar que los campos estén correctos
+    # Validar que los campos estÃ©n correctos
     if not all([nombre, stock, precio_venta, estado_producto, categoria, codigo_barras]):
         return jsonify({"msg": "Faltan datos obligatorios"}), 400
 
@@ -447,7 +516,7 @@ def get_all_products():
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            # Consulta SQL para obtener todos los productos y su informaci�n
+            # Consulta SQL para obtener todos los productos y su información
             cursor.execute('''
                 SELECT 
                     p.id_producto, 
@@ -476,18 +545,50 @@ def get_all_products():
     finally:
         connection.close()
 
-# Ruta para obtener todas las categorías
+# Ruta para obtener todas las categorí­as
 @app.route('/categories', methods=['GET'])
 def get_all_categories():
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            # Consulta SQL para obtener todas las categorías
+            # Consulta SQL para obtener todas las categorí­as
             cursor.execute('SELECT id_categoria, nombre_categoria FROM CATEGORIA')
             categories = cursor.fetchall()
         
-        # Retornar las categorías en formato JSON
+        # Retornar las categorí­as en formato JSON
         return jsonify(categories), 200
+    finally:
+        connection.close()
+
+# Ruta para agregar una nueva categoría de productos
+@app.route('/categories', methods=['POST'])
+def add_category():
+    nueva_categoria = request.json.get('nombre_categoria')
+
+    # Validar que se proporcionó el nombre de la categoría
+    if not nueva_categoria:
+        return jsonify({"msg": "Nombre de la categoría faltante"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Verificar si la categoría ya existe
+            cursor.execute('SELECT id_categoria FROM CATEGORIA WHERE nombre_categoria = %s', (nueva_categoria,))
+            categoria_existente = cursor.fetchone()
+
+            if categoria_existente:
+                return jsonify({"msg": "La categoría ya existe"}), 400
+
+            # Insertar la nueva categoría en la tabla CATEGORIA
+            cursor.execute('''
+                INSERT INTO CATEGORIA (nombre_categoria) 
+                VALUES (%s)
+            ''', (nueva_categoria,))
+            connection.commit()
+
+        return jsonify({"msg": "Categoría agregada exitosamente"}), 201
+    except Exception as e:
+        return jsonify({"msg": "Ocurrió un error al agregar la categoría", "error": str(e)}), 500
     finally:
         connection.close()
 
