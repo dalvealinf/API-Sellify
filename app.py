@@ -13,6 +13,32 @@ CORS(app)
 app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # Clave estática para JWT
 jwt = JWTManager(app)
 
+# Función utilizada para la verificación de RUT
+def validar_rut(rut):
+    if len(rut) < 8 or not rut[:-1].isdigit() or not rut[-1].isalnum():
+        return False
+
+    cuerpo_rut = rut[:-1]
+    dv = rut[-1].upper()
+
+    suma = 0
+    multiplicador = 2
+
+    for c in reversed(cuerpo_rut):
+        suma += int(c) * multiplicador
+        multiplicador += 1
+        if multiplicador == 8:
+            multiplicador = 2
+
+    digito_verificador_calculado = 11 - (suma % 11)
+    if digito_verificador_calculado == 11:
+        digito_verificador_calculado = "0"
+    elif digito_verificador_calculado == 10:
+        digito_verificador_calculado = "K"
+    else:
+        digito_verificador_calculado = str(digito_verificador_calculado)
+
+    return dv == digito_verificador_calculado
 
 #########################################################
 #        Sección Administradores y Cajeros              #
@@ -32,6 +58,10 @@ def register():
     # Validar que los campos obligatorios estén presentes
     if not all([rut, nombre, apellido, correo, contrasena, telefono, tipo_usuario, estado]):
         return jsonify({"msg": "Faltan datos"}), 400
+    
+    # Validar el formato del RUT
+    if not validar_rut(rut):
+        return jsonify({"msg": "RUT inválido"}), 400
 
     password_hash = generate_password_hash(contrasena)
     connection = get_db_connection()
