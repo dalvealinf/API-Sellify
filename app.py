@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required
 from flask_cors import CORS
 from config import get_db_connection
 from dotenv import load_dotenv
+from datetime import datetime
 import os
 
 load_dotenv()
@@ -392,6 +393,7 @@ def get_product_by_barcode(codigo_barras):
                     p.fecha_vencimiento,
                     s.stock,
                     d.porcentaje AS descuento,
+                    d.vencimiento_descuento,
                     cb.codigo AS codigo_barras,
                     pr.precio_venta,
                     e.estado AS estado_producto,
@@ -455,6 +457,19 @@ def update_product_by_barcode(codigo_barras):
     precio_venta = new_data.get('precio_venta')
     estado_producto = new_data.get('estado')
     categoria = new_data.get('categoria')
+    vencimiento_descuento = new_data.get('vencimiento_descuento')
+
+    # Validar que si se proporciona un vencimiento de descuento, no sea una fecha anterior a la actual
+    if vencimiento_descuento:
+        try:
+            fecha_vencimiento_descuento = datetime.strptime(vencimiento_descuento, '%Y-%m-%d').date()
+            fecha_actual = datetime.now().date()
+
+            if fecha_vencimiento_descuento <= fecha_actual:
+                return jsonify({"msg": "La fecha de vencimiento del descuento no puede ser igual o anterior a la fecha actual"}), 400
+
+        except ValueError:
+            return jsonify({"msg": "Formato de fecha inválido para el vencimiento del descuento"}), 400
 
     connection = get_db_connection()
     try:
@@ -467,6 +482,7 @@ def update_product_by_barcode(codigo_barras):
 
             id_producto = product['id_producto']
 
+            # Actualizar los detalles del producto
             cursor.execute('''
                 UPDATE PRODUCTOS 
                 SET nombre = %s, descripcion = %s, fecha_vencimiento = %s, id_estado = (SELECT id_estado FROM ESTADO WHERE estado = %s), 
@@ -477,11 +493,27 @@ def update_product_by_barcode(codigo_barras):
             # Actualizar el stock
             cursor.execute('UPDATE STOCK SET stock = %s WHERE id_producto = %s', (stock, id_producto))
 
-            # Actualizar el descuento
-            cursor.execute('UPDATE DESCUENTOS SET porcentaje = %s WHERE id_producto = %s', (descuento, id_producto))
-
             # Actualizar el precio de venta
             cursor.execute('UPDATE PRECIO SET precio_venta = %s WHERE id_producto = %s', (precio_venta, id_producto))
+
+            # Verificar si el producto ya tiene un descuento en la tabla DESCUENTOS
+            cursor.execute('SELECT * FROM DESCUENTOS WHERE id_producto = %s', (id_producto,))
+            descuento_existente = cursor.fetchone()
+
+            if descuento is not None:
+                if descuento_existente:
+                    # Si ya existe un descuento, se actualiza
+                    cursor.execute('''
+                        UPDATE DESCUENTOS 
+                        SET porcentaje = %s, vencimiento_descuento = %s 
+                        WHERE id_producto = %s
+                    ''', (descuento, vencimiento_descuento, id_producto))
+                else:
+                    # Si no existe, se inserta un nuevo descuento con fecha de vencimiento
+                    cursor.execute('''
+                        INSERT INTO DESCUENTOS (id_producto, porcentaje, vencimiento_descuento) 
+                        VALUES (%s, %s, %s)
+                    ''', (id_producto, descuento, vencimiento_descuento))
 
             connection.commit()
 
@@ -502,14 +534,28 @@ def add_product():
     estado_producto = new_data.get('estado')
     categoria = new_data.get('categoria')
     codigo_barras = new_data.get('codigo_barras')
+    vencimiento_descuento = new_data.get('vencimiento_descuento')
 
-    # Validar que los campos estÃ©n correctos
+    # Validar que los campos estén correctos
     if not all([nombre, stock, precio_venta, estado_producto, categoria, codigo_barras]):
         return jsonify({"msg": "Faltan datos obligatorios"}), 400
+
+    # Validar que si se proporciona un vencimiento de descuento, no sea una fecha anterior a la actual
+    if vencimiento_descuento:
+        try:
+            fecha_vencimiento_descuento = datetime.strptime(vencimiento_descuento, '%Y-%m-%d').date()
+            fecha_actual = datetime.now().date()
+
+            if fecha_vencimiento_descuento <= fecha_actual:
+                return jsonify({"msg": "La fecha de vencimiento del descuento no puede ser igual o anterior a la fecha actual"}), 400
+
+        except ValueError:
+            return jsonify({"msg": "Formato de fecha inválido para el vencimiento del descuento"}), 400
 
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
+            # Insertar el nuevo producto
             cursor.execute('''
                 INSERT INTO PRODUCTOS (nombre, descripcion, fecha_registro, fecha_vencimiento, id_estado, id_categoria)
                 VALUES (%s, %s, current_timestamp(), %s, 
@@ -526,9 +572,9 @@ def add_product():
             # Insertar el stock en la tabla STOCK
             cursor.execute('INSERT INTO STOCK (id_producto, stock) VALUES (%s, %s)', (product_id, stock))
 
-            # Insertar el descuento en la tabla DESCUENTOS
+            # Insertar el descuento en la tabla DESCUENTOS junto con vencimiento_descuento si aplica
             if descuento:
-                cursor.execute('INSERT INTO DESCUENTOS (id_producto, porcentaje) VALUES (%s, %s)', (product_id, descuento))
+                cursor.execute('INSERT INTO DESCUENTOS (id_producto, porcentaje, vencimiento_descuento) VALUES (%s, %s, %s)', (product_id, descuento, vencimiento_descuento))
 
             # Insertar el precio en la tabla PRECIO
             cursor.execute('INSERT INTO PRECIO (id_producto, precio_venta) VALUES (%s, %s)', (product_id, precio_venta))
@@ -556,6 +602,7 @@ def get_all_products():
                     p.fecha_vencimiento, 
                     s.stock, 
                     d.porcentaje AS descuento, 
+                    d.vencimiento_descuento,
                     cb.codigo AS codigo_barras, 
                     pr.precio_venta, 
                     e.estado AS estado_producto, 
