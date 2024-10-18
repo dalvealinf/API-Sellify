@@ -1,6 +1,6 @@
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import Flask, jsonify, request
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flask_cors import CORS
 from config import get_db_connection
 from dotenv import load_dotenv
@@ -371,6 +371,37 @@ def update_user_points(rut):
             connection.commit()
 
         return jsonify({"msg": message}), 200
+    finally:
+        connection.close()
+
+# Ruta para obtener todos los datos de un usuario dado el token entregado
+@app.route('/profile', methods=['GET'])
+@jwt_required()
+def profile():
+    current_user = get_jwt_identity()
+    rut = current_user.get('rut')
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    u.rut,
+                    u.nombre,
+                    u.apellido,
+                    u.correo,
+                    u.telefono,
+                    u.fecha_creacion,
+                    (SELECT tipo FROM TIPOUSUARIO WHERE id_tipo_usuario = u.id_tipo_usuario) AS tipo_usuario
+                FROM USUARIOS u
+                WHERE u.rut = %s
+            ''', (rut,))
+            user = cursor.fetchone()
+
+        if user:
+            return jsonify(user), 200
+        else:
+            return jsonify({"msg": "Usuario no encontrado"}), 404
     finally:
         connection.close()
 
