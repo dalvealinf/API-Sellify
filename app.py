@@ -700,5 +700,104 @@ def add_category():
     finally:
         connection.close()
 
+#########################################################
+#                   Sección Ventas                      #
+#########################################################
+
+# Ruta para obtener todos los datos de la tabla DETALLEVENTA con el código de barras
+@app.route('/detalleventa', methods=['GET'])
+def get_all_detalle_venta():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    dv.id_venta,
+                    cb.codigo AS codigo_barras,
+                    dv.cantidad,
+                    dv.total_sin_iva,
+                    dv.total_con_iva
+                FROM DETALLEVENTA dv
+                LEFT JOIN CODIGOBARRAS cb ON dv.id_producto = cb.id_producto
+            ''')
+            detalle_venta = cursor.fetchall()
+
+        return jsonify(detalle_venta), 200
+    except Exception as e:
+        print(f"Error al obtener los detalles de venta: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener los datos de detalle de venta"}), 500
+    finally:
+        connection.close()
+
+# Ruta para obtener los datos de venta de un producto dado su codigo de barras
+@app.route('/detalleventa/<string:codigo_barras>', methods=['GET'])
+def get_detalle_venta_by_codigo_barras(codigo_barras):
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    dv.id_venta,
+                    cb.codigo AS codigo_barras,  -- Obtener el código de barras del producto
+                    dv.cantidad,
+                    dv.total_sin_iva,
+                    dv.total_con_iva
+                FROM DETALLEVENTA dv
+                LEFT JOIN CODIGOBARRAS cb ON dv.id_producto = cb.id_producto
+                WHERE cb.codigo = %s
+            ''', (codigo_barras,))
+            detalle_venta = cursor.fetchall()
+
+        if detalle_venta:
+            return jsonify(detalle_venta), 200
+        else:
+            return jsonify({"msg": "No se encontraron detalles de venta para este código de barras"}), 404
+    except Exception as e:
+        print(f"Error al obtener los detalles de venta para el código de barras {codigo_barras}: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener los datos de detalle de venta"}), 500
+    finally:
+        connection.close()
+
+# Ruta para insertar una nueva venta basada en un código de barras
+@app.route('/detalleventa', methods=['POST'])
+def add_venta():
+    data = request.json
+    codigo_barras = data.get('codigo_barras')
+    cantidad = data.get('cantidad')
+    total_sin_iva = data.get('total_sin_iva')
+    total_con_iva = data.get('total_con_iva')
+
+    # Validar que los datos obligatorios estén presentes
+    if not all([codigo_barras, cantidad, total_sin_iva, total_con_iva]):
+        return jsonify({"msg": "Faltan datos obligatorios"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Obtener el id_producto asociado al código de barras
+            cursor.execute('SELECT id_producto FROM CODIGOBARRAS WHERE codigo = %s', (codigo_barras,))
+            producto = cursor.fetchone()
+
+            if not producto:
+                return jsonify({"msg": "Producto no encontrado para el código de barras proporcionado"}), 404
+
+            id_producto = producto['id_producto']
+
+            # Insertar los datos en la tabla DETALLEVENTA
+            cursor.execute('''
+                INSERT INTO DETALLEVENTA (id_producto, cantidad, total_sin_iva, total_con_iva)
+                VALUES (%s, %s, %s, %s)
+            ''', (id_producto, cantidad, total_sin_iva, total_con_iva))
+
+            connection.commit()
+
+        return jsonify({"msg": "Venta insertada exitosamente"}), 201
+    except Exception as e:
+        print(f"Error al insertar la venta: {e}")
+        return jsonify({"msg": "Ocurrió un error al insertar la venta"}), 500
+    finally:
+        connection.close()
+
+
 if __name__ == '__main__':
     app.run(debug=True)
