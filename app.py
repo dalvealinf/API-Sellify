@@ -10,7 +10,7 @@ import os
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True, origins="*")
 app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # Clave estática para JWT
 jwt = JWTManager(app)
 
@@ -795,6 +795,55 @@ def add_venta():
     except Exception as e:
         print(f"Error al insertar la venta: {e}")
         return jsonify({"msg": "Ocurrió un error al insertar la venta"}), 500
+    finally:
+        connection.close()
+
+# Ruta para obtener todos los datos de la tabla VENTA, con opción de filtrar por fecha de venta
+@app.route('/ventas', methods=['GET'])
+def get_all_ventas():
+    # Obtener los parámetros de fecha de inicio y fin de la solicitud
+    fecha_inicio = request.args.get('fecha_inicio')
+    fecha_fin = request.args.get('fecha_fin')
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            query = '''
+                SELECT 
+                    v.id_venta, 
+                    v.id_cliente, 
+                    v.id_cajero, 
+                    v.total_sin_iva, 
+                    v.total_con_iva, 
+                    v.fecha_venta, 
+                    v.numero_documento, 
+                    v.porcentaje, 
+                    v.id_forma_pago, 
+                    v.id_tipodocumento
+                FROM VENTA v
+            '''
+            params = []
+
+            if fecha_inicio and fecha_fin:
+                query += ' WHERE v.fecha_venta BETWEEN %s AND %s'
+                params.extend([fecha_inicio, fecha_fin])
+            elif fecha_inicio:
+                query += ' WHERE v.fecha_venta >= %s'
+                params.append(fecha_inicio)
+            elif fecha_fin:
+                query += ' WHERE v.fecha_venta <= %s'
+                params.append(fecha_fin)
+
+            cursor.execute(query, params)
+            ventas = cursor.fetchall()
+
+            if not ventas:
+                return jsonify({"msg": "No se encontraron ventas en el rango de fechas proporcionado"}), 404
+
+        return jsonify(ventas), 200
+    except Exception as e:
+        print(f"Error al obtener las ventas: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener las ventas"}), 500
     finally:
         connection.close()
 
