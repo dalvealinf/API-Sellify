@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_cors import CORS
 from config import get_db_connection
 from dotenv import load_dotenv
+from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 import os
 
@@ -847,6 +848,36 @@ def get_all_ventas():
     finally:
         connection.close()
 
+
+#########################################################
+#    Sección verificación periódica de vencimientos     #
+#########################################################
+
+# Función para eliminar descuentos vencidos
+def eliminar_descuentos_vencidos():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Borrar los descuentos cuya fecha de vencimiento es anterior a la fecha actual
+            cursor.execute('''
+                DELETE FROM DESCUENTOS
+                WHERE vencimiento_descuento < %s
+            ''', (datetime.now().date(),))
+            connection.commit()
+            print(f"Descuentos vencidos eliminados exitosamente a las {datetime.now()}")
+    except Exception as e:
+        print(f"Error al eliminar los descuentos vencidos: {e}")
+    finally:
+        connection.close()
+
+# Configuración de la programación
+scheduler = BackgroundScheduler()
+scheduler.add_job(func=eliminar_descuentos_vencidos, trigger="interval", hours=24)
+scheduler.start()
+
+# Código para evitar que el programador continúe ejecutándose
+import atexit
+atexit.register(lambda: scheduler.shutdown(wait=False))
 
 if __name__ == '__main__':
     app.run(debug=True)
