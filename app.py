@@ -761,7 +761,7 @@ def get_detalle_venta_by_codigo_barras(codigo_barras):
 
 # Ruta para insertar una nueva venta basada en un código de barras
 @app.route('/detalleventa', methods=['POST'])
-def add_venta():
+def add_detalleventa():
     data = request.json
     codigo_barras = data.get('codigo_barras')
     cantidad = data.get('cantidad')
@@ -845,6 +845,51 @@ def get_all_ventas():
     except Exception as e:
         print(f"Error al obtener las ventas: {e}")
         return jsonify({"msg": "Ocurrió un error al obtener las ventas"}), 500
+    finally:
+        connection.close()
+
+# Ruta para insertar una nueva venta en la tabla VENTA
+@app.route('/ventas', methods=['POST'])
+def add_venta():
+    data = request.json
+    id_cliente = data.get('id_cliente')
+    id_cajero = data.get('id_cajero')
+    total_sin_iva = data.get('total_sin_iva')
+    total_con_iva = data.get('total_con_iva')
+    fecha_venta = data.get('fecha_venta')
+    numero_documento = data.get('numero_documento')
+    porcentaje = data.get('porcentaje')
+    id_forma_pago = data.get('id_forma_pago')
+    id_tipodocumento = data.get('id_tipodocumento')
+
+    # Validar que los datos obligatorios estén presentes
+    if not all([id_cliente, id_cajero, total_sin_iva, total_con_iva, fecha_venta, numero_documento, id_forma_pago, id_tipodocumento]):
+        return jsonify({"msg": "Faltan datos obligatorios"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Insertar los datos en la tabla VENTA
+            cursor.execute('''
+                INSERT INTO VENTA (
+                    id_cliente, 
+                    id_cajero, 
+                    total_sin_iva, 
+                    total_con_iva, 
+                    fecha_venta, 
+                    numero_documento, 
+                    porcentaje, 
+                    id_forma_pago, 
+                    id_tipodocumento
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (id_cliente, id_cajero, total_sin_iva, total_con_iva, fecha_venta, numero_documento, porcentaje, id_forma_pago, id_tipodocumento))
+
+            connection.commit()
+
+        return jsonify({"msg": "Venta registrada exitosamente"}), 201
+    except Exception as e:
+        print(f"Error al insertar la venta: {e}")
+        return jsonify({"msg": "Ocurrió un error al registrar la venta"}), 500
     finally:
         connection.close()
 
