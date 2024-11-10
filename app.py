@@ -6,12 +6,14 @@ from config import get_db_connection
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
+from flask_socketio import SocketIO
 import os
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, supports_credentials=True, origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*")
 app.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY')  # Clave estática para JWT
 jwt = JWTManager(app)
 
@@ -944,6 +946,35 @@ def get_boleta(id_venta):
     finally:
         connection.close()
 
+############################
+#    Sección Websocket     #
+############################
+
+@socketio.on('connect')
+def handle_connect():
+    print('Cliente conectado')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Cliente desconectado')
+
+@socketio.on('scan_request')
+def handle_scan_request(data):
+    print('Petición de escaneo recibida por parte de:', data)
+    socketio.emit('scan_response', {'message': 'Escaneo iniciado'})
+
+@socketio.on('barcode_scanned')
+def handle_barcode_scanned(data):
+    barcode = data.get('barcode')
+    rut = data.get('rut')
+
+    if not barcode or not rut:
+        return
+
+    print(f"Código de barras recibido para el rut {rut}: {barcode}")
+
+    # Emitir solo a los clientes conectados que tengan el rut específico
+    socketio.emit(f'barcode_update_{rut}', {'barcode': barcode})
 
 
 #########################################################
@@ -977,4 +1008,4 @@ import atexit
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True)
