@@ -705,21 +705,20 @@ def add_category():
 #                   Sección Ventas                      #
 #########################################################
 
-# Ruta para obtener todos los datos de la tabla DETALLEVENTA con el código de barras
+# Ruta para obtener todos los datos de la tabla DETALLEVENTA
 @app.route('/detalleventa', methods=['GET'])
 def get_all_detalle_venta():
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
+            # Consulta para obtener todos los registros de DETALLEVENTA
             cursor.execute('''
                 SELECT 
                     dv.id_venta,
-                    cb.codigo AS codigo_barras,
                     dv.cantidad,
-                    dv.total_sin_iva,
-                    dv.total_con_iva
+                    p.nombre AS producto_nombre
                 FROM DETALLEVENTA dv
-                LEFT JOIN CODIGOBARRAS cb ON dv.id_producto = cb.id_producto
+                INNER JOIN PRODUCTOS p ON dv.id_producto = p.id_producto
             ''')
             detalle_venta = cursor.fetchall()
 
@@ -730,74 +729,73 @@ def get_all_detalle_venta():
     finally:
         connection.close()
 
-# Ruta para obtener los datos de venta de un producto dado su codigo de barras
-@app.route('/detalleventa/<string:codigo_barras>', methods=['GET'])
-def get_detalle_venta_by_codigo_barras(codigo_barras):
+# Ruta para obtener los datos de venta dado el id de venta
+@app.route('/detalleventa/<int:id_venta>', methods=['GET'])
+def get_detalle_venta_by_id_venta(id_venta):
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
+            # Consulta para obtener detalles de DETALLEVENTA con un id_venta específico
             cursor.execute('''
                 SELECT 
                     dv.id_venta,
-                    cb.codigo AS codigo_barras,  -- Obtener el código de barras del producto
                     dv.cantidad,
-                    dv.total_sin_iva,
-                    dv.total_con_iva
+                    p.nombre AS producto_nombre
                 FROM DETALLEVENTA dv
-                LEFT JOIN CODIGOBARRAS cb ON dv.id_producto = cb.id_producto
-                WHERE cb.codigo = %s
-            ''', (codigo_barras,))
+                INNER JOIN PRODUCTOS p ON dv.id_producto = p.id_producto
+                WHERE dv.id_venta = %s
+            ''', (id_venta,))
             detalle_venta = cursor.fetchall()
 
         if detalle_venta:
             return jsonify(detalle_venta), 200
         else:
-            return jsonify({"msg": "No se encontraron detalles de venta para este código de barras"}), 404
+            return jsonify({"msg": "No se encontraron detalles de venta para este id de venta"}), 404
     except Exception as e:
-        print(f"Error al obtener los detalles de venta para el código de barras {codigo_barras}: {e}")
+        print(f"Error al obtener los detalles de venta para id de venta {id_venta}: {e}")
         return jsonify({"msg": "Ocurrió un error al obtener los datos de detalle de venta"}), 500
     finally:
         connection.close()
 
-# Ruta para insertar una nueva venta basada en un código de barras
+# Ruta para insertar un nuevo registro en DETALLEVENTA
 @app.route('/detalleventa', methods=['POST'])
 def add_detalleventa():
     data = request.json
-    codigo_barras = data.get('codigo_barras')
+    id_venta = data.get('id_venta')
+    producto_nombre = data.get('producto_nombre')
     cantidad = data.get('cantidad')
-    total_sin_iva = data.get('total_sin_iva')
-    total_con_iva = data.get('total_con_iva')
 
     # Validar que los datos obligatorios estén presentes
-    if not all([codigo_barras, cantidad, total_sin_iva, total_con_iva]):
+    if not all([id_venta, producto_nombre, cantidad]):
         return jsonify({"msg": "Faltan datos obligatorios"}), 400
 
     connection = get_db_connection()
     try:
         with connection.cursor() as cursor:
-            # Obtener el id_producto asociado al código de barras
-            cursor.execute('SELECT id_producto FROM CODIGOBARRAS WHERE codigo = %s', (codigo_barras,))
+            # Obtener el id_producto correspondiente al nombre del producto
+            cursor.execute('SELECT id_producto FROM PRODUCTOS WHERE nombre = %s', (producto_nombre,))
             producto = cursor.fetchone()
 
             if not producto:
-                return jsonify({"msg": "Producto no encontrado para el código de barras proporcionado"}), 404
+                return jsonify({"msg": "Producto no encontrado"}), 404
 
             id_producto = producto['id_producto']
 
             # Insertar los datos en la tabla DETALLEVENTA
             cursor.execute('''
-                INSERT INTO DETALLEVENTA (id_producto, cantidad, total_sin_iva, total_con_iva)
-                VALUES (%s, %s, %s, %s)
-            ''', (id_producto, cantidad, total_sin_iva, total_con_iva))
+                INSERT INTO DETALLEVENTA (id_venta, id_producto, cantidad)
+                VALUES (%s, %s, %s)
+            ''', (id_venta, id_producto, cantidad))
 
             connection.commit()
 
-        return jsonify({"msg": "Venta insertada exitosamente"}), 201
+        return jsonify({"msg": "Detalle de venta insertado exitosamente"}), 201
     except Exception as e:
-        print(f"Error al insertar la venta: {e}")
-        return jsonify({"msg": "Ocurrió un error al insertar la venta"}), 500
+        print(f"Error al insertar el detalle de venta: {e}")
+        return jsonify({"msg": "Ocurrió un error al insertar el detalle de venta"}), 500
     finally:
         connection.close()
+
 
 # Ruta para obtener todos los datos de la tabla VENTA, con opción de filtrar por fecha de venta
 @app.route('/ventas', methods=['GET'])
@@ -892,6 +890,60 @@ def add_venta():
         return jsonify({"msg": "Ocurrió un error al registrar la venta"}), 500
     finally:
         connection.close()
+
+#########################
+#    Sección boleta     #
+#########################
+
+# Ruta para obtener los datos completos de una boleta
+@app.route('/boleta/<int:id_venta>', methods=['GET'])
+def get_boleta(id_venta):
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Obtener datos generales de la venta y asociar los nombres y apellidos de cliente, cajero, forma de pago y tipo de documento
+            cursor.execute('''
+                SELECT 
+                    v.fecha_venta,
+                    v.total_sin_iva,
+                    v.total_con_iva,
+                    v.numero_documento,
+                    v.porcentaje,
+                    (SELECT CONCAT(nombre, ' ', apellido) FROM USUARIOS WHERE id_usuario = v.id_cliente) AS cliente,
+                    (SELECT CONCAT(nombre, ' ', apellido) FROM USUARIOS WHERE id_usuario = v.id_cajero) AS cajero,
+                    (SELECT metodo FROM FORMAPAGO WHERE id_forma_pago = v.id_forma_pago) AS forma_pago,
+                    (SELECT nombre FROM TIPODOCUMENTO WHERE id_tipodocumento = v.id_tipodocumento) AS tipo_documento
+                FROM VENTA v
+                WHERE v.id_venta = %s
+            ''', (id_venta,))
+            venta = cursor.fetchone()
+
+            if not venta:
+                return jsonify({"msg": "Venta no encontrada"}), 404
+
+            # Obtener detalles de productos en la venta
+            cursor.execute('''
+                SELECT 
+                    dv.cantidad,
+                    p.nombre,
+                    p.descripcion,
+                    p.fecha_vencimiento
+                FROM DETALLEVENTA dv
+                INNER JOIN PRODUCTOS p ON dv.id_producto = p.id_producto
+                WHERE dv.id_venta = %s
+            ''', (id_venta,))
+            productos = cursor.fetchall()
+
+            # Combinar datos de la venta y productos
+            boleta = {
+                "venta": venta,
+                "productos": productos
+            }
+
+        return jsonify(boleta), 200
+    finally:
+        connection.close()
+
 
 
 #########################################################
