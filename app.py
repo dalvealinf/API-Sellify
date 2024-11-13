@@ -946,6 +946,54 @@ def get_boleta(id_venta):
     finally:
         connection.close()
 
+# Ruta para obtener los detalles de todas las boletas
+@app.route('/boletas', methods=['GET'])
+def get_all_boletas():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Obtener todas las ventas con datos de cliente, cajero, forma de pago y tipo de documento
+            cursor.execute('''
+                SELECT 
+                    v.id_venta,
+                    v.fecha_venta,
+                    v.total_sin_iva,
+                    v.total_con_iva,
+                    v.numero_documento,
+                    v.porcentaje,
+                    (SELECT CONCAT(nombre, ' ', apellido) FROM USUARIOS WHERE id_usuario = v.id_cliente) AS cliente,
+                    (SELECT CONCAT(nombre, ' ', apellido) FROM USUARIOS WHERE id_usuario = v.id_cajero) AS cajero,
+                    (SELECT metodo FROM FORMAPAGO WHERE id_forma_pago = v.id_forma_pago) AS forma_pago,
+                    (SELECT nombre FROM TIPODOCUMENTO WHERE id_tipodocumento = v.id_tipodocumento) AS tipo_documento
+                FROM VENTA v
+            ''')
+            ventas = cursor.fetchall()
+
+            # Para cada venta, obtener los detalles de los productos referentes a esa venta
+            boletas = []
+            for venta in ventas:
+                cursor.execute('''
+                    SELECT 
+                        dv.cantidad,
+                        p.nombre,
+                        p.descripcion,
+                        p.fecha_vencimiento
+                    FROM DETALLEVENTA dv
+                    INNER JOIN PRODUCTOS p ON dv.id_producto = p.id_producto
+                    WHERE dv.id_venta = %s
+                ''', (venta['id_venta'],))
+                productos = cursor.fetchall()
+
+                boleta = {
+                    "venta": venta,
+                    "productos": productos
+                }
+                boletas.append(boleta)
+
+        return jsonify(boletas), 200
+    finally:
+        connection.close()
+
 ############################
 #    Sección Websocket     #
 ############################
