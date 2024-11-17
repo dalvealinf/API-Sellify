@@ -408,6 +408,55 @@ def profile():
     finally:
         connection.close()
 
+# Ruta para obtener los 5 usuarios con mayor cantidad de puntos
+@app.route('/top-users-by-points', methods=['GET'])
+def get_top_users_by_points():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    CONCAT(u.nombre, ' ', u.apellido) AS nombre_completo,
+                    p.puntos
+                FROM USUARIOS u
+                INNER JOIN PUNTOS p ON u.id_usuario = p.id_cliente
+                ORDER BY p.puntos DESC
+                LIMIT 5
+            ''')
+            top_users = cursor.fetchall()
+
+        return jsonify(top_users), 200
+    except Exception as e:
+        print(f"Error al obtener los usuarios con más puntos: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener los datos"}), 500
+    finally:
+        connection.close()
+
+# Ruta para obtener los 5 usuarios con mayor cantidad de ventas
+@app.route('/top-users-by-sales', methods=['GET'])
+def get_top_users_by_sales():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    CONCAT(u.nombre, ' ', u.apellido) AS nombre_completo,
+                    COUNT(v.id_venta) AS total_ventas
+                FROM USUARIOS u
+                INNER JOIN VENTA v ON u.id_usuario = v.id_cliente
+                GROUP BY u.id_usuario
+                ORDER BY total_ventas DESC
+                LIMIT 5
+            ''')
+            top_users = cursor.fetchall()
+
+        return jsonify(top_users), 200
+    except Exception as e:
+        print(f"Error al obtener los usuarios con más ventas: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener los datos"}), 500
+    finally:
+        connection.close()
+
 #########################################################
 #                   Sección Productos                   #
 #########################################################
