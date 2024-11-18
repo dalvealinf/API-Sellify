@@ -942,6 +942,67 @@ def add_venta():
     finally:
         connection.close()
 
+# Ruta para obtener la mejor venta de la semana
+@app.route('/best-sale-of-week', methods=['GET'])
+def get_best_sale_of_week():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    v.id_venta,
+                    v.total_con_iva as monto,
+                    CONCAT(u.nombre, ' ', u.apellido) as vendedor,
+                    v.fecha_venta
+                FROM VENTA v
+                INNER JOIN USUARIOS u ON v.id_cajero = u.id_usuario
+                WHERE v.fecha_venta >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                ORDER BY v.total_con_iva DESC
+                LIMIT 1
+            ''')
+            best_sale = cursor.fetchone()
+
+            if not best_sale:
+                return jsonify({"msg": "No se encontraron ventas esta semana"}), 404
+
+        return jsonify(best_sale), 200
+    except Exception as e:
+        print(f"Error al obtener la mejor venta: {e}")
+        return jsonify({"msg": "Error al obtener datos"}), 500
+    finally:
+        connection.close()
+
+# Ruta para obtener el cajero con más ventas del mes
+@app.route('/best-seller-of-month', methods=['GET'])
+def get_best_seller_of_month():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('''
+                SELECT 
+                    CONCAT(u.nombre, ' ', u.apellido) as vendedor,
+                    SUM(v.total_con_iva) as total_ventas,
+                    COUNT(v.id_venta) as numero_ventas
+                FROM VENTA v
+                INNER JOIN USUARIOS u ON v.id_cajero = u.id_usuario
+                WHERE MONTH(v.fecha_venta) = MONTH(CURRENT_DATE())
+                    AND YEAR(v.fecha_venta) = YEAR(CURRENT_DATE())
+                GROUP BY v.id_cajero
+                ORDER BY total_ventas DESC
+                LIMIT 1
+            ''')
+            best_seller = cursor.fetchone()
+
+            if not best_seller:
+                return jsonify({"msg": "No se encontraron ventas este mes"}), 404
+
+        return jsonify(best_seller), 200
+    except Exception as e:
+        print(f"Error al obtener el mejor vendedor: {e}")
+        return jsonify({"msg": "Error al obtener datos"}), 500
+    finally:
+        connection.close()
+
 #########################
 #    Sección boleta     #
 #########################
