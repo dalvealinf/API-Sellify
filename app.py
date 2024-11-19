@@ -942,6 +942,71 @@ def add_venta():
     finally:
         connection.close()
 
+# Ruta para insertar una nueva venta y sus detalles
+@app.route('/ventas-detalle', methods=['POST'])
+def add_venta_with_details():
+    data = request.json
+    id_cliente = data.get('id_cliente')
+    id_cajero = data.get('id_cajero')
+    total_sin_iva = data.get('total_sin_iva')
+    total_con_iva = data.get('total_con_iva')
+    fecha_venta = data.get('fecha_venta')
+    numero_documento = data.get('numero_documento')
+    porcentaje = data.get('porcentaje')
+    id_forma_pago = data.get('id_forma_pago')
+    id_tipodocumento = data.get('id_tipodocumento')
+    productos = data.get('productos')  # Lista de productos
+
+    # Validar que los datos estén presentes
+    if not all([id_cliente, id_cajero, total_sin_iva, total_con_iva, fecha_venta, numero_documento, id_forma_pago, id_tipodocumento]):
+        return jsonify({"msg": "Faltan datos  para la venta"}), 400
+
+    if not productos or not isinstance(productos, list) or len(productos) == 0:
+        return jsonify({"msg": "Se requiere al menos un producto para registrar la venta"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Insertar la venta en la tabla VENTA
+            cursor.execute('''
+                INSERT INTO VENTA (
+                    id_cliente, 
+                    id_cajero, 
+                    total_sin_iva, 
+                    total_con_iva, 
+                    fecha_venta, 
+                    numero_documento, 
+                    porcentaje, 
+                    id_forma_pago, 
+                    id_tipodocumento
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (id_cliente, id_cajero, total_sin_iva, total_con_iva, fecha_venta, numero_documento, porcentaje, id_forma_pago, id_tipodocumento))
+
+            # Obtener el ID de la venta recién insertada
+            id_venta = cursor.lastrowid
+
+            # Insertar los productos en DETALLEVENTA
+            for producto in productos:
+                id_producto = producto.get('id_producto')
+                cantidad = producto.get('cantidad')
+
+                if not all([id_producto, cantidad]):
+                    return jsonify({"msg": "Cada producto debe incluir id_producto y cantidad"}), 400
+
+                cursor.execute('''
+                    INSERT INTO DETALLEVENTA (id_venta, id_producto, cantidad)
+                    VALUES (%s, %s, %s)
+                ''', (id_venta, id_producto, cantidad))
+
+            connection.commit()
+
+        return jsonify({"msg": "Venta y detalles registrados exitosamente", "id_venta": id_venta}), 201
+    except Exception as e:
+        print(f"Error al registrar la venta: {e}")
+        return jsonify({"msg": "Ocurrió un error al registrar la venta", "error": str(e)}), 500
+    finally:
+        connection.close()
+
 # Ruta para obtener la mejor venta de la semana
 @app.route('/best-sale-of-week', methods=['GET'])
 def get_best_sale_of_week():
