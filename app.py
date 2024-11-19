@@ -1135,6 +1135,62 @@ def handle_barcode_scanned(data):
     socketio.emit(f'barcode_update_{rut}', {'barcode': barcode})
 
 
+############################
+#    Sección registros     #
+############################
+
+# Ruta para obtener todos los registros
+@app.route('/registros', methods=['GET'])
+def get_all_registros():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Consulta para obtener todos los registros de REGISTROHISTORIAL
+            cursor.execute('''
+                SELECT id_registro, mensaje, fecha_y_hora, tipo, descripcion, usuario
+                FROM REGISTROHISTORIAL
+            ''')
+            registros = cursor.fetchall()
+
+        return jsonify(registros), 200
+    except Exception as e:
+        print(f"Error al obtener los registros: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener los registros"}), 500
+    finally:
+        connection.close()
+
+# Ruta para insertar un nuevo registro
+@app.route('/registros', methods=['POST'])
+def add_registro():
+    data = request.json
+    mensaje = data.get('mensaje')
+    fecha_y_hora = data.get('fecha_y_hora')
+    tipo = data.get('tipo')
+    descripcion = data.get('descripcion')
+    usuario = data.get('usuario')
+
+    # Validar que los campos obligatorios estén presentes
+    if not all([mensaje, fecha_y_hora, tipo, usuario]):
+        return jsonify({"msg": "Faltan datos obligatorios"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Insertar un nuevo registro en REGISTROHISTORIAL
+            cursor.execute('''
+                INSERT INTO REGISTROHISTORIAL (mensaje, fecha_y_hora, tipo, descripcion, usuario)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (mensaje, fecha_y_hora, tipo, descripcion, usuario))
+            connection.commit()
+
+        return jsonify({"msg": "Registro agregado exitosamente"}), 201
+    except Exception as e:
+        print(f"Error al insertar el registro: {e}")
+        return jsonify({"msg": "Ocurrió un error al insertar el registro"}), 500
+    finally:
+        connection.close()
+
+
 #########################################################
 #    Sección verificación periódica de vencimientos     #
 #########################################################
