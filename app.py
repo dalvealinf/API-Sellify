@@ -1069,6 +1069,57 @@ def get_best_seller_of_month():
         connection.close()
 
 #########################
+#    Sección compra     #
+#########################
+
+# Ruta para obtener todas las compras y los productos asociados
+@app.route('/compras', methods=['GET'])
+def get_all_compras():
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Obtener todas las compras
+            cursor.execute('''
+                SELECT 
+                    c.id_compra,
+                    c.fecha_compra,
+                    c.total_sin_iva,
+                    c.total_con_iva,
+                    c.numero_documento,
+                    CONCAT(u.nombre, ' ', u.apellido) AS proveedor
+                FROM COMPRA c
+                INNER JOIN USUARIOS u ON c.id_proveedor = u.id_usuario
+            ''')
+            compras = cursor.fetchall()
+
+            # Obtener los productos
+            resultado = []
+            for compra in compras:
+                cursor.execute('''
+                    SELECT 
+                        dc.cantidad,
+                        p.nombre AS producto_nombre,
+                        p.descripcion
+                    FROM DETALLECOMPRA dc
+                    INNER JOIN PRODUCTOS p ON dc.id_producto = p.id_producto
+                    WHERE dc.id_compra = %s
+                ''', (compra['id_compra'],))
+                productos = cursor.fetchall()
+
+                resultado.append({
+                    "compra": compra,
+                    "productos": productos
+                })
+
+        return jsonify(resultado), 200
+    except Exception as e:
+        print(f"Error al obtener las compras: {e}")
+        return jsonify({"msg": "Ocurrió un error al obtener las compras"}), 500
+    finally:
+        connection.close()
+
+
+#########################
 #    Sección boleta     #
 #########################
 
