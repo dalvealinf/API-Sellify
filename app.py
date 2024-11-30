@@ -457,6 +457,30 @@ def get_top_users_by_sales():
     finally:
         connection.close()
 
+# Ruta para activar usuarios
+@app.route('/users/<string:rut>/activate', methods=['PUT'])
+def activate_user(rut):
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Obtener estado activo
+            cursor.execute('SELECT id_estado FROM ESTADO WHERE estado = %s', ('activo',))
+            estado_activo = cursor.fetchone()
+
+            if not estado_activo:
+                return jsonify({"msg": "Estado activo no encontrado"}), 400
+
+            # Actualizar el estado del usuario a activo
+            cursor.execute('UPDATE USUARIOS SET id_estado = %s WHERE rut = %s', (estado_activo['id_estado'], rut))
+            connection.commit()
+
+            if cursor.rowcount == 0:
+                return jsonify({'msg': 'Usuario no encontrado'}), 404
+
+        return jsonify({'msg': 'Usuario activado exitosamente'}), 200
+    finally:
+        connection.close()
+
 #########################################################
 #                   Sección Productos                   #
 #########################################################
