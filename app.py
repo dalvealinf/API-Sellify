@@ -1142,6 +1142,68 @@ def get_all_compras():
     finally:
         connection.close()
 
+# Ruta para registrar una compra con sus productos asociados
+@app.route('/compras-detalle', methods=['POST'])
+def add_compra_with_details():
+    data = request.json
+    id_proveedor = data.get('id_proveedor')
+    total_sin_iva = data.get('total_sin_iva')
+    total_con_iva = data.get('total_con_iva')
+    fecha_compra = data.get('fecha_compra')
+    numero_documento = data.get('numero_documento')
+    id_forma_pago = data.get('id_forma_pago')
+    id_tipodocumento = data.get('id_tipodocumento')
+    productos = data.get('productos')
+
+    # Validar que los datos estén presentes
+    if not all([id_proveedor, total_sin_iva, total_con_iva, fecha_compra, numero_documento, id_forma_pago, id_tipodocumento]):
+        return jsonify({"msg": "Faltan datos para la compra"}), 400
+
+    if not productos or not isinstance(productos, list) or len(productos) == 0:
+        return jsonify({"msg": "Se requiere al menos un producto para registrar la compra"}), 400
+
+    connection = get_db_connection()
+    try:
+        with connection.cursor() as cursor:
+            # Insertar la compra en COMPRA
+            cursor.execute('''
+                INSERT INTO COMPRA (
+                    id_proveedor, 
+                    total_sin_iva, 
+                    total_con_iva, 
+                    fecha_compra, 
+                    numero_documento, 
+                    id_forma_pago, 
+                    id_tipodocumento
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (id_proveedor, total_sin_iva, total_con_iva, fecha_compra, numero_documento, id_forma_pago, id_tipodocumento))
+
+            # Obtener el ID de la compra recién insertada
+            id_compra = cursor.lastrowid
+
+            # Insertar los productos en DETALLECOMPRA
+            for producto in productos:
+                id_producto = producto.get('id_producto')
+                cantidad = producto.get('cantidad')
+
+                if not all([id_producto, cantidad]):
+                    return jsonify({"msg": "Cada producto debe incluir id_producto y cantidad"}), 400
+
+                cursor.execute('''
+                    INSERT INTO DETALLECOMPRA (id_compra, id_producto, cantidad)
+                    VALUES (%s, %s, %s)
+                ''', (id_compra, id_producto, cantidad))
+
+            connection.commit()
+
+        return jsonify({"msg": "Compra y detalles registrados exitosamente", "id_compra": id_compra}), 201
+    except Exception as e:
+        print(f"Error al registrar la compra: {e}")
+        return jsonify({"msg": "Ocurrió un error al registrar la compra", "error": str(e)}), 500
+    finally:
+        connection.close()
+
+
 
 #########################
 #    Sección boleta     #
